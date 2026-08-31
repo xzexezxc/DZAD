@@ -22,7 +22,7 @@ function classifyError(error, status) {
   if (/JSON|parse|selector|metadata/i.test(error?.message || '')) return 'parsing';
   return 'network';
 }
-function challengeDetected(text, url) { return /captcha|verify you are human|access denied|security check/i.test(`${url} ${text}`); }
+function challengeDetected(text, url) { return /captcha|verify you are human|access denied|security check|cf-chl-|challenge-platform/i.test(`${url} ${text}`); }
 function parseJsonLd(html) { return [...html.matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].flatMap(m => { try { const json = JSON.parse(m[1]); return Array.isArray(json) ? json : [json]; } catch { return []; } }); }
 function deterministic(html, url) {
   const ld = parseJsonLd(html).find(x => /VideoObject|Movie|TVEpisode/i.test(x['@type'] || '')) || {};
@@ -56,7 +56,12 @@ async function aiMap(candidate, evidence, provider) {
 }
 async function loadSession(file) { try { return decryptJson(JSON.parse(await fs.readFile(file, 'utf8'))); } catch { return undefined; } }
 async function saveSession(file, state) { await fs.mkdir(path.dirname(path.resolve(file)), { recursive: true }); await fs.writeFile(file, JSON.stringify(encryptJson(state)), { mode: 0o600 }); }
-function proxies(config) { return (Array.isArray(config.proxies) ? config.proxies : String(config.proxies || process.env.SCRAPER_PROXIES || '').split(',')).map(x => String(x).trim()).filter(Boolean); }
+function proxies(config) {
+  const configured = Array.isArray(config.proxies) ? config.proxies : String(config.proxies || '').split(',');
+  const webshare = String(config.webshareProxyUrls || process.env.WEBSHARE_PROXY_URLS || '').split(',');
+  const fallback = String(process.env.SCRAPER_PROXIES || '').split(',');
+  return [...new Set([...configured, ...webshare, ...fallback].map(x => x.trim()).filter(Boolean))];
+}
 function retryable(status, error) { return status === 429 || status === 502 || status === 503 || status === 504 || /ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up/i.test(error?.message || ''); }
 function createProxyPool(values) { let index = 0; return { current: () => values.length ? values[index % values.length] : undefined, rotate: () => { if (values.length > 1) index = (index + 1) % values.length; } }; }
 async function contextFor(browser, config, state, proxy) {
@@ -88,9 +93,10 @@ async function fetchPage(browser, config, url, state, pool, stats) {
 
 export async function testScrape(config, progress = () => {}) {
   const startedAt = Date.now(); const stats = metric(); const pool = createProxyPool(proxies(config));
-  const result = { status: 'RUNNING', sourceGalleryUrl: config.galleryUrl, discoveredFromGallery: [], items: [], errors: [], metrics: stats, scraperVersion: '3.0.0' };
+  const result = { status: 'RUNNING', sourceGalleryUrl: config.galleryUrl, discoveredFromGallery: [], items: [], errors: [], metrics: stats, scraperVersion: '3.1.0' };
   let browser;
-  try { browser = await chromium.launch({ headless: config.headless !== false }); }
+  const headless = config.headless ?? (process.env.SCRAPER_HEADLESS !== 'false');
+  try { browser = await chromium.launch({ headless, ...(headless ? {} : { slowMo: Number(config.slowMoMs || 50) }) }); }
   catch (error) { return { ...result, status: 'FAILED', errors: [{ category: 'runtime', message: error.message }] }; }
   const sessionState = config.storageStatePath ? await loadSession(config.storageStatePath) : undefined;
   let galleryContext;
