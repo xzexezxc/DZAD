@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
 
-const DEFAULT_KEY = '2b591c1b056bd55b00938aba1f98db63f67801fa945f060ad085f2b0a3f96d58';
-
 const keyFromEnv = () => {
-  const raw = process.env.CREDENTIAL_ENCRYPTION_KEY || DEFAULT_KEY;
-  if (!/^[0-9a-f]{64}$/i.test(raw)) return Buffer.from(DEFAULT_KEY, 'hex');
+  const raw = process.env.CREDENTIAL_ENCRYPTION_KEY;
+  if (!raw || !/^[0-9a-f]{64}$/i.test(raw)) {
+    throw new Error('CREDENTIAL_ENCRYPTION_KEY must be a 32-byte hexadecimal key');
+  }
   return Buffer.from(raw, 'hex');
 };
 
@@ -16,6 +16,7 @@ export function encryptJson(value) {
 }
 
 export function decryptJson(record) {
+  if (!record || record.v !== 1) throw new Error('Unsupported encrypted record');
   const decipher = crypto.createDecipheriv('aes-256-gcm', keyFromEnv(), Buffer.from(record.iv, 'base64url'));
   decipher.setAuthTag(Buffer.from(record.tag, 'base64url'));
   return JSON.parse(Buffer.concat([decipher.update(Buffer.from(record.ciphertext, 'base64url')), decipher.final()]).toString('utf8'));
