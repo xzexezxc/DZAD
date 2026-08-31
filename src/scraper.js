@@ -56,16 +56,34 @@ async function aiMap(candidate, evidence, provider) {
 }
 async function loadSession(file) { try { return decryptJson(JSON.parse(await fs.readFile(file, 'utf8'))); } catch { return undefined; } }
 async function saveSession(file, state) { await fs.mkdir(path.dirname(path.resolve(file)), { recursive: true }); await fs.writeFile(file, JSON.stringify(encryptJson(state)), { mode: 0o600 }); }
+
+function oxylabsWebUnblocker(config) {
+  const username = String(config.oxylabsUsername || process.env.OXYLABS_WEB_UNBLOCKER_USERNAME || '').trim();
+  const password = String(config.oxylabsPassword || process.env.OXYLABS_WEB_UNBLOCKER_PASSWORD || '').trim();
+  if (!username || !password) return null;
+  const endpoint = String(config.oxylabsEndpoint || process.env.OXYLABS_WEB_UNBLOCKER_ENDPOINT || 'unblock.oxylabs.io:60000').trim();
+  const geo = String(config.oxylabsGeoLocation || process.env.OXYLABS_GEO_LOCATION || 'France').trim();
+  return { url: `http://${encodeURIComponent(username)}:${encodeURIComponent(password)}@${endpoint}`, geo, sessionId: String(config.oxylabsSessionId || `dzad-${process.pid}-${Date.now()}`) };
+}
+
 function proxies(config) {
   const configured = Array.isArray(config.proxies) ? config.proxies : String(config.proxies || '').split(',');
   const webshare = String(config.webshareProxyUrls || process.env.WEBSHARE_PROXY_URLS || '').split(',');
   const fallback = String(process.env.SCRAPER_PROXIES || '').split(',');
-  return [...new Set([...configured, ...webshare, ...fallback].map(x => x.trim()).filter(Boolean))];
+  const oxylabs = oxylabsWebUnblocker(config)?.url || '';
+  return [...new Set([...configured, ...webshare, ...fallback, oxylabs].map(x => x.trim()).filter(Boolean))];
 }
 function retryable(status, error) { return status === 429 || status === 502 || status === 503 || status === 504 || /ECONNRESET|ECONNREFUSED|ENOTFOUND|socket hang up/i.test(error?.message || ''); }
 function createProxyPool(values) { let index = 0; return { current: () => values.length ? values[index % values.length] : undefined, rotate: () => { if (values.length > 1) index = (index + 1) % values.length; } }; }
+function isOxylabsProxy(proxy, config) { return Boolean(proxy && proxy === oxylabsWebUnblocker(config)?.url); }
 async function contextFor(browser, config, state, proxy) {
-  return browser.newContext({ ...(state ? { storageState: state } : {}), ...(proxy ? { proxy: { server: proxy } } : {}), userAgent: config.userAgent || USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)], extraHTTPHeaders: { 'Accept-Language': config.acceptLanguage || ACCEPT_LANGUAGES[Math.floor(Math.random() * ACCEPT_LANGUAGES.length)] }, locale: config.locale || 'fr-FR' });
+  const oxylabs = isOxylabsProxy(proxy, config) ? oxylabsWebUnblocker(config) : null;
+  const extraHTTPHeaders = { 'Accept-Language': config.acceptLanguage || ACCEPT_LANGUAGES[Math.floor(Math.random() * ACCEPT_LANGUAGES.length)] };
+  if (oxylabs) {
+    extraHTTPHeaders['x-oxylabs-geo-location'] = oxylabs.geo;
+    extraHTTPHeaders['X-Oxylabs-Session-Id'] = oxylabs.sessionId;
+  }
+  return browser.newContext({ ...(state ? { storageState: state } : {}), ...(proxy ? { proxy: { server: proxy } } : {}), ...(oxylabs ? { ignoreHTTPSErrors: true } : {}), userAgent: config.userAgent || USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)], extraHTTPHeaders, locale: config.locale || 'fr-FR' });
 }
 async function fetchPage(browser, config, url, state, pool, stats) {
   const maxRetries = Math.max(0, Number(config.maxRetries ?? 3));
@@ -93,7 +111,7 @@ async function fetchPage(browser, config, url, state, pool, stats) {
 
 export async function testScrape(config, progress = () => {}) {
   const startedAt = Date.now(); const stats = metric(); const pool = createProxyPool(proxies(config));
-  const result = { status: 'RUNNING', sourceGalleryUrl: config.galleryUrl, discoveredFromGallery: [], items: [], errors: [], metrics: stats, scraperVersion: '3.1.0' };
+  const result = { status: 'RUNNING', sourceGalleryUrl: config.galleryUrl, discoveredFromGallery: [], items: [], errors: [], metrics: stats, scraperVersion: '3.2.0' };
   let browser;
   const headless = config.headless ?? (process.env.SCRAPER_HEADLESS !== 'false');
   try { browser = await chromium.launch({ headless, ...(headless ? {} : { slowMo: Number(config.slowMoMs || 50) }) }); }
