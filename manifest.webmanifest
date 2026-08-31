@@ -1,0 +1,10 @@
+{
+  "name": "CATHPRN — StreamVault Management Center",
+  "short_name": "CATHPRN",
+  "description": "Private media catalog, connector health and AI-assisted library management.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d19",
+  "theme_color": "#090d19",
+  "icons": []
+}

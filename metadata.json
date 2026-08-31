@@ -1,0 +1,8 @@
+{
+  "name": "CATHPRN StreamVault",
+  "description": "StreamVault Management Center - Streaming library and AI connector management center",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
